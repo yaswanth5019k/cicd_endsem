@@ -1,0 +1,12 @@
+---
+- name: Deploy Hospital Management System Frontend
+  hosts: all
+  become: yes
+  vars:
+    frontend_image_name: hospital-frontend
+    frontend_image_tag: latest
+    k8s_namespace: hospital
+    backend_api_url: http://localhost:8081
+
+  roles:
+    - frontend

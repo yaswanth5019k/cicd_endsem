@@ -1,0 +1,19 @@
+[Unit]
+Description=Hospital Management System Backend
+After=network.target mysql.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory={{ backend_app_dir }}
+ExecStart=/usr/bin/java -jar {{ backend_app_dir }}/{{ backend_jar_name }}
+Restart=on-failure
+RestartSec=10
+
+Environment="SPRING_DATASOURCE_URL=jdbc:mysql://localhost:3306/{{ mysql_database }}"
+Environment="SPRING_DATASOURCE_USERNAME=root"
+Environment="SPRING_DATASOURCE_PASSWORD={{ mysql_password }}"
+Environment="SERVER_PORT=8081"
+
+[Install]
+WantedBy=multi-user.target

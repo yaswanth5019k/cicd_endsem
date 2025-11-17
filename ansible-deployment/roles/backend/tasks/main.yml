@@ -1,0 +1,66 @@
+---
+- name: Install Java 21
+  package:
+    name: openjdk-21-jdk
+    state: present
+  when: ansible_os_family == "Debian"
+
+- name: Install Java 21 (RedHat/CentOS)
+  package:
+    name: java-21-openjdk
+    state: present
+  when: ansible_os_family == "RedHat"
+
+- name: Install Maven
+  package:
+    name: maven
+    state: present
+
+- name: Create backend application directory
+  file:
+    path: "{{ backend_app_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Copy backend source code
+  synchronize:
+    src: ../../hospital-backend/
+    dest: "{{ backend_app_dir }}/src/"
+    delete: yes
+    recursive: yes
+
+- name: Build backend application with Maven
+  shell: |
+    cd {{ backend_app_dir }}/src
+    ./mvnw clean package -DskipTests
+  args:
+    creates: "{{ backend_app_dir }}/src/target/{{ backend_jar_name }}"
+
+- name: Copy JAR to deployment directory
+  copy:
+    src: "{{ backend_app_dir }}/src/target/{{ backend_jar_name }}"
+    dest: "{{ backend_app_dir }}/{{ backend_jar_name }}"
+    remote_src: yes
+    mode: '0755'
+
+- name: Create systemd service file for backend
+  template:
+    src: hospital-backend.service.j2
+    dest: /etc/systemd/system/hospital-backend.service
+    mode: '0644'
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes
+
+- name: Enable and start hospital-backend service
+  systemd:
+    name: hospital-backend
+    enabled: yes
+    state: restarted
+
+- name: Wait for backend to be ready
+  wait_for:
+    port: 8081
+    delay: 5
+    timeout: 60

@@ -1,0 +1,119 @@
+---
+- name: Install Docker
+  block:
+    - name: Install Docker dependencies (Debian/Ubuntu)
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - software-properties-common
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Add Docker GPG key (Debian/Ubuntu)
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Add Docker repository (Debian/Ubuntu)
+      apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install Docker (Debian/Ubuntu)
+      apt:
+        name: docker-ce
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+- name: Ensure Docker service is running
+  systemd:
+    name: docker
+    state: started
+    enabled: yes
+
+- name: Install kubectl
+  get_url:
+    url: https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl
+    dest: /usr/local/bin/kubectl
+    mode: '0755'
+
+- name: Check if Minikube is installed
+  stat:
+    path: /usr/local/bin/minikube
+  register: minikube_installed
+
+- name: Install Minikube
+  get_url:
+    url: https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+    dest: /usr/local/bin/minikube
+    mode: '0755'
+  when: not minikube_installed.stat.exists
+
+- name: Start Minikube
+  shell: minikube start --driver=docker --force
+  args:
+    creates: /root/.minikube/machines/minikube/config.json
+  environment:
+    MINIKUBE_IN_STYLE: "false"
+
+- name: Wait for Minikube to be ready
+  shell: kubectl get nodes
+  register: nodes_result
+  until: nodes_result.rc == 0
+  retries: 10
+  delay: 10
+
+- name: Set Docker environment to use Minikube
+  shell: eval $(minikube -p minikube docker-env)
+  args:
+    executable: /bin/bash
+
+- name: Copy frontend source to build directory
+  synchronize:
+    src: ../../../hospital-frontend/
+    dest: /tmp/hospital-frontend/
+    delete: yes
+    recursive: yes
+
+- name: Build frontend Docker image in Minikube
+  shell: |
+    eval $(minikube -p minikube docker-env)
+    docker build -t {{ frontend_image_name }}:{{ frontend_image_tag }} /tmp/hospital-frontend/
+  args:
+    executable: /bin/bash
+
+- name: Create Kubernetes namespace
+  shell: kubectl apply -f -
+  args:
+    stdin: "{{ lookup('file', 'namespace.yaml') }}"
+
+- name: Deploy frontend to Kubernetes
+  shell: kubectl apply -f -
+  args:
+    stdin: "{{ lookup('file', 'deployment.yaml') }}"
+
+- name: Create frontend service
+  shell: kubectl apply -f -
+  args:
+    stdin: "{{ lookup('file', 'service.yaml') }}"
+
+- name: Wait for frontend deployment to be ready
+  shell: kubectl rollout status deployment/hospital-frontend -n hospital
+  register: rollout_status
+  until: rollout_status.rc == 0
+  retries: 10
+  delay: 10
+
+- name: Get frontend service URL
+  shell: minikube service hospital-frontend -n hospital --url
+  register: service_url
+
+- name: Display frontend URL
+  debug:
+    msg: "Frontend is accessible at: {{ service_url.stdout }}"
